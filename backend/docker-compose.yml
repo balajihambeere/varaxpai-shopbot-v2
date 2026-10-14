@@ -1,0 +1,59 @@
+name: catalog-retrieval-assistant
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c \"exec 3<>/dev/tcp/127.0.0.1/6333\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rerank:
+    build: ./services/rerank
+    ports:
+      - "8001:8001"
+    environment:
+      RERANK_MODEL_NAME: Xenova/ms-marco-MiniLM-L-6-v2
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8010:8000"
+    env_file:
+      - .env  # injected at container runtime only — .env is excluded from the
+               # image itself via .dockerignore, so a real OPENAI_API_KEY never
+               # gets baked into an image layer.
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      RERANK_URL: http://rerank:8001/rerank
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rerank:
+        condition: service_healthy
+
+volumes:
+  qdrant_data:
